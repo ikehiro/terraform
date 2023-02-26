@@ -27,3 +27,8 @@ override.tf.json
 
 # Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
 # example: *tfplan*
+
+
+# 2023.2.27 H.Ikeda add
+# Local lock file
+.terraform.lock.hcl
