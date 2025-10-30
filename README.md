@@ -1338,3 +1338,77 @@ GitHub
 +1
 
 必要であれば、モジュール毎のディレクトリ構成・ファイル構成・ベストプラクティスも日本語で解説できます。
+
+以下に、中〜大規模 Terraform プロジェクトでのおすすめファイル構成例 を示します。
+GruntworkやHashiCorpの推奨構成をベースに、日本語で整理しています。
+
+🗂️ Terraform ディレクトリ構成（例）
+terraform/
+├── main.tf               # メインエントリポイント（module呼び出しなど）
+├── providers.tf          # プロバイダー設定 (AWS, Azure, etc.)
+├── variables.tf          # 入力変数定義
+├── outputs.tf            # 出力値定義
+├── locals.tf             # ローカル変数定義（名前規則など）
+├── data.tf               # dataソース (既存リソース参照など)
+│
+├── network.tf            # VPC, サブネット, ルート, NAT, GW など
+├── security.tf           # IAM, Security Group, KMSなど
+├── compute.tf            # EC2, ECS, Lambda, AutoScalingなど
+├── storage.tf            # S3, EBS, EFS など
+├── database.tf           # RDS, DynamoDB など
+│
+├── backend.tf            # State backend設定 (S3, GCSなど)
+├── terraform.tfvars      # 変数の実値（環境別に分けることも多い）
+│
+└── environments/
+    ├── dev/
+    │   ├── main.tfvars
+    │   ├── backend.tfvars
+    │   └── override.tf
+    ├── staging/
+    └── prod/
+
+🧩 ファイルの役割説明
+ファイル名	内容
+main.tf	各モジュール呼び出し・主要リソースの定義
+providers.tf	provider "aws" などの設定（リージョン指定含む）
+variables.tf	入力パラメータ（例：VPC CIDR, インスタンスタイプなど）
+outputs.tf	terraform output で出す値を定義
+locals.tf	名前規則や共通タグなどのローカル変数
+data.tf	既存のAWSリソースなどを参照する data "aws_..." ブロック
+backend.tf	stateファイルをS3などに保存する設定
+terraform.tfvars	実際の値。環境ごとに dev.tfvars, prod.tfvars などを分けるのが定番
+🌱 環境別構成の考え方
+
+複数環境を扱う場合、以下のようにディレクトリ分けするのがベストです。
+
+environments/
+├── dev/
+│   ├── terraform.tfvars
+│   ├── backend.tfvars
+│   └── override.tf
+├── staging/
+└── prod/
+
+
+terraform workspace を併用するか、環境ディレクトリを分ける方式が一般的。
+
+CI/CD（例: GitHub Actions, Terraform Cloud）と組み合わせると、環境ごとのデプロイ制御が容易になります。
+
+💡 図による構成イメージ
+┌────────────────────────────┐
+│ terraform/                 │
+│  ├── base設定               │
+│  │   ├── main.tf           │
+│  │   ├── variables.tf      │
+│  │   ├── outputs.tf        │
+│  │   └── modules/          │
+│  │        ├── vpc/         │
+│  │        ├── ec2/         │
+│  │        └── rds/         │
+│  │
+│  └── environments/          │
+│        ├── dev/             │
+│        ├── staging/         │
+│        └── prod/            │
+└────────────────────────────┘
