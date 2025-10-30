@@ -1323,3 +1323,18 @@ module "subnets" {
 必要なら、あなたの現在のコードを貼ってくれれば、適切な分割単位（VPC/ネットワーク/セキュリティ/計算/データ/監視…）に具体的にリファクタします。
 
 いい視点です。既存コードから「どこでディレクトリ／ファイル操作しているか」を洗い出すなら、静的と動的の両輪が効きます。すぐ使える実ファイルも用意しました（ダウンロード可）。
+
+こちらが Gruntwork 社による Terragrunt／Terraform 用のサンプルリポジトリの URL です：
+
+「インフラモジュール」のサンプルリポジトリ:
+https://github.com/gruntwork-io/terragrunt-infrastructure-modules-example
+ 
+GitHub
+
+「インフラ実運用ライブ構成」のサンプルリポジトリ:
+https://github.com/gruntwork-io/terragrunt-infrastructure-live-example
+ 
+GitHub
++1
+
+必要であれば、モジュール毎のディレクトリ構成・ファイル構成・ベストプラクティスも日本語で解説できます。
