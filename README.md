@@ -1412,3 +1412,208 @@ CI/CD（例: GitHub Actions, Terraform Cloud）と組み合わせると、環境
 │        ├── staging/         │
 │        └── prod/            │
 └────────────────────────────┘
+
+
+
+----------------------------------------------------------
+了解です。いわゆる “ラッパーモジュール（親モジュール）→ 子モジュール” 構成で、呼び出し元（root）から子モジュールの入力を設定したい場合の定石は次の2パターンです。
+
+
+
+パターンA：ラッパーで「受けて→そのまま渡す」（最も素直）
+
+
+```
+root
+ └─ module "stack"（= 親/ラッパー）
+      ├─ module "network"（子）
+      └─ module "ecs"（子）
+```
+
+
+1) root（呼び出し側）
+
+
+```
+# live/dev/main.tf
+module "stack" {
+  source = "../../modules/stack"
+
+  # 子network用の入力を親の入力として公開し、rootから値を与える
+  vpc_cidr              = "10.1.0.0/16"
+  public_subnet_cidrs   = ["10.1.1.0/24", "10.1.2.0/24"]
+
+  # 子ecs用の入力も同様に公開
+  ecs_name        = "web"
+  ecs_desired     = 2
+  ecs_task_env    = { ENV = "dev", LOG_LEVEL = "info" }
+}
+```
+
+
+2) 親/ラッパー（受けて→子へ渡す）
+
+
+```
+# modules/stack/variables.tf
+variable "vpc_cidr" {
+  type    = string
+  default = "10.0.0.0/16"
+}
+
+variable "public_subnet_cidrs" {
+  type    = list(string)
+  default = ["10.0.1.0/24", "10.0.2.0/24"]
+}
+
+variable "ecs_name"    { type = string  default = "app" }
+variable "ecs_desired" { type = number  default = 1 }
+variable "ecs_task_env"{ type = map(string) default = {} }
+```
+
+```
+# modules/stack/main.tf
+module "network" {
+  source               = "../network"
+  vpc_cidr             = var.vpc_cidr
+  public_subnet_cidrs  = var.public_subnet_cidrs
+}
+
+module "ecs" {
+  source        = "../ecs"
+  name          = var.ecs_name
+  desired_count = var.ecs_desired
+  task_env      = var.ecs_task_env
+  # もしnetworkの出力が必要なら、親で受けて子へ渡す
+  subnets       = module.network.public_subnet_ids
+  vpc_id        = module.network.vpc_id
+}
+```
+
+✅ ポイント
+- Terraformには「自動的な変数のバケツリレー」はありません。親で変数を定義し直して、子に明示的に渡すのが基本です。
+- 子の output が必要なら、親でいったん受けて、別の子へ渡します（上記の subnets, vpc_id など）。
+
+
+
+
+パターンB：ラッパーで“名前空間オブジェクト”を受け取り、子へ分配（スッキリしやすい）
+
+
+
+子モジュール群の入力をオブジェクトで名前空間ごとにまとめて受け取り、親で展開して子へ渡す方法です。環境別 tfvars にも乗せやすく、拡張性が高いです。
+
+
+
+1) root（呼び出し側）
+
+
+```
+# live/dev/main.tf
+module "stack" {
+  source = "../../modules/stack"
+
+  network = {
+    cidr              = "10.1.0.0/16"
+    public_subnet_cidrs = ["10.1.1.0/24", "10.1.2.0/24"]
+  }
+
+  ecs = {
+    name          = "web"
+    desired_count = 2
+    task_env      = { ENV = "dev", LOG_LEVEL = "info" }
+  }
+}
+```
+
+もちろん .tfvars にもそのまま書けます:
+```
+# dev.tfvars
+network = { cidr = "10.1.0.0/16", public_subnet_cidrs = ["10.1.1.0/24","10.1.2.0/24"] }
+ecs     = { name = "web", desired_count = 2, task_env = { ENV = "dev" } }
+```
+
+
+
+
+2) 親/ラッパー（名前空間オブジェクトを定義し、子へマッピング）
+
+
+
+Terraform 1.3+ なら optional属性 が使えるので、キーを任意化しつつデフォルトも与えられます。
+```
+# modules/stack/variables.tf
+variable "network" {
+  type = object({
+    cidr               = optional(string, "10.0.0.0/16")
+    public_subnet_cidrs= optional(list(string), ["10.0.1.0/24","10.0.2.0/24"])
+  })
+  default = {}
+}
+
+variable "ecs" {
+  type = object({
+    name          = optional(string, "app")
+    desired_count = optional(number, 1)
+    task_env      = optional(map(string), {})
+  })
+  default = {}
+}
+```
+
+```
+# modules/stack/main.tf
+module "network" {
+  source              = "../network"
+  vpc_cidr            = var.network.cidr
+  public_subnet_cidrs = var.network.public_subnet_cidrs
+}
+
+module "ecs" {
+  source        = "../ecs"
+  name          = var.ecs.name
+  desired_count = var.ecs.desired_count
+  task_env      = var.ecs.task_env
+  vpc_id        = module.network.vpc_id
+  subnets       = module.network.public_subnet_ids
+}
+```
+
+✅ メリット
+- ルート側は network { ... }, ecs { ... } のまとまりで記述でき、環境差分管理が楽。
+- 後から子モジュールの入力が増えても、同じ名前空間オブジェクト内で拡張しやすい。
+- optional属性で必須/任意の切り分けとデフォルトを親で集中管理できる。
+
+
+🔁 Terraform 1.2以前でも使いたい場合optionalが使えないので、any/map(any)＋merge()で疑似optionalにします：
+```
+variable "ecs" { type = map(any) default = {} }
+
+locals {
+  ecs_defaults = { name = "app", desired_count = 1, task_env = {} }
+  ecs_effective = merge(local.ecs_defaults, var.ecs)
+}
+
+module "ecs" {
+  source        = "../ecs"
+  name          = local.ecs_effective.name
+  desired_count = local.ecs_effective.desired_count
+  task_env      = local.ecs_effective.task_env
+}
+```
+
+
+---
+
+
+
+よくある質問（実務TIPS）
+
+
+
+- Q: 子モジュールの変数を“そのまま全部”渡すワイルドカード的な書き方はある？
+  A: ありません。 Terraformは明示的にマッピングします（= 可読性・安全性のため）。
+- Q: 子のoutputを別の子に渡す順序制御は？
+  module.b.output_x を参照している限り、Terraformは依存関係を解釈します。必要に応じて depends_on を親の module ブロックに追加可能。
+- Q: environmentsごとに差し替えたい
+  *.tfvars で network { ... }, ecs { ... } を分けるのが扱いやすいです。Terragruntの場合は inputs に同名オブジェクトを定義して親へ渡すのが定石。
